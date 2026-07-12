@@ -79,6 +79,12 @@
   .job .meta{color:var(--muted); font-size:12.5px; margin-top:5px; line-height:1.6;}
   .job .meta .iva{color:#cbd5e1;}
   .job .meta .trip{color:#fbbf24;}
+  .job .brk{display:flex; align-items:baseline; gap:8px; font-size:13.5px; color:#cbd5e1;
+    margin-top:5px; border-bottom:1px dashed var(--line); padding-bottom:5px;}
+  .job .brk:last-of-type{border-bottom:none;}
+  .job .brk .l{flex:1;}
+  .job .brk .t{color:var(--muted); font-variant-numeric:tabular-nums;}
+  .job .brk .c{min-width:80px; text-align:right; font-weight:600; color:var(--text); font-variant-numeric:tabular-nums;}
   .job .delrow{display:flex; justify-content:flex-end; margin-top:2px;}
   .job .del{background:none; color:var(--muted); font-size:13px; padding:4px 6px; margin:-2px -6px -2px 0;}
   .empty{color:var(--muted); text-align:center; padding:24px 0; font-size:14px;}
@@ -492,25 +498,31 @@
     jobs.forEach(j=>{
       const el = document.createElement("div");
       el.className = "job";
+      const v = j.viaggio;
+      // le tre voci: andata / lavoro / ritorno, ognuna con tempo e costo
+      const riga = (nome, tempo, importo) =>
+        '<div class="brk"><span class="l">'+nome+'</span><span class="t">'+tempo+'</span><span class="c">'+importo+'</span></div>';
+      let brkHtml = "";
+      if(v && v.andata) brkHtml += riga("🚗 Andata", Math.round(v.minAndata)+" min", euro(v.minAndata/60*(v.rate||0)));
+      brkHtml += riga("🔧 Lavoro", fmtDur(j.ms), euro(j.lavoro!=null ? j.lavoro : (j.imponibile||0)));
+      if(v && v.ritorno) brkHtml += riga("🏠 Ritorno", Math.round(v.minRitorno)+" min", euro(v.minRitorno/60*(v.rate||0)));
       let tripHtml = "";
-      if(j.viaggio){
-        const v = j.viaggio, parts = [];
-        if(v.andata) parts.push("🚗 andata "+Math.round(v.minAndata)+" min");
-        if(v.ritorno) parts.push("🏠 ritorno "+Math.round(v.minRitorno)+" min");
-        const metodo = v.metodo==="percorso" ? "🗺 percorso" : "≈ stima";
-        tripHtml = '<div class="trip">'+parts.join(" · ")+" · "+(Math.round(v.km*10)/10).toLocaleString("it-IT")+" km · "+euro(v.cost)+" · "+metodo+'</div>';
+      if(v){
+        tripHtml = '<div class="trip">'+(v.metodo==="percorso" ? "🗺 percorso reale" : "≈ stima")+" · "
+          +(Math.round(v.km*10)/10).toLocaleString("it-IT")+" km a tratta</div>";
       }
       el.innerHTML =
         '<div class="top"><span class="name"></span><span class="cost">'+euro(j.totale||0)+'</span></div>'+
+        '<div class="meta"><div class="when"></div></div>'+
+        brkHtml+
         '<div class="meta">'+
-          '<div class="when"></div>'+
           tripHtml+
           '<div class="iva">Imponibile '+euro(j.imponibile||0)+'  ·  + IVA '+(j.ivaP||0)+'% '+euro(j.iva||0)+'</div>'+
         '</div>'+
         '<div class="delrow"><button class="del">Elimina</button></div>';
       el.querySelector(".name").textContent = j.cliente;
       el.querySelector(".when").textContent =
-        fmtDate(j.start) + " → " + fmtDate(j.end) + "  ·  " + fmtDur(j.ms) + "  ·  " + (j.rate||0) + "€/h";
+        fmtDate(j.start) + " → " + fmtDate(j.end) + "  ·  " + (j.rate||0) + "€/h";
       el.querySelector(".del").addEventListener("click", ()=>{
         if(confirm("Eliminare «"+j.cliente+"»?")){
           jobs = jobs.filter(x=>x.id!==j.id);
