@@ -209,7 +209,7 @@
 </div>
 <div id="lista"></div>
 
-<div class="ver">Sul Posto · v1.15 · 13/07/2026 · MXM</div>
+<div class="ver">Sul Posto · v1.16 · 13/07/2026 · MXM</div>
 
 <script>
 (function(){
@@ -309,7 +309,7 @@
     const tRate = Number(cfg.travelRate)||0;
     return {
       andata: !!active.andata, ritorno: !!active.ritorno, metodo: metodo,
-      km: km, minAndata: active.andata?minLeg:0, minRitorno: active.ritorno?minLeg:0,
+      km: km, minLeg: minLeg, minAndata: active.andata?minLeg:0, minRitorno: active.ritorno?minLeg:0,
       rate: tRate, cost: (minLeg*legs)/60*tRate
     };
   }
@@ -597,7 +597,7 @@
       brkHtml += riga("🔧 Lavoro", fmtDur(j.ms), euro(j.lavoro!=null ? j.lavoro : (j.imponibile||0)));
       if(v && v.ritorno) brkHtml += riga("🏠 Ritorno", Math.round(v.minRitorno)+" min", euro(v.minRitorno/60*(v.rate||0)));
       let tripHtml = "";
-      if(v){
+      if(v && (v.andata || v.ritorno)){
         tripHtml = '<div class="trip">'+(v.metodo==="percorso" ? "🗺 percorso reale" : "≈ stima")+" · "
           +(Math.round(v.km*10)/10).toLocaleString("it-IT")+" km a tratta</div>";
       }
@@ -617,6 +617,12 @@
             '<div><label>Arrivo</label><input type="datetime-local" class="e-start"></div>'+
             '<div><label>Fine</label><input type="datetime-local" class="e-end"></div>'+
           '</div>'+
+          '<div class="trips" style="margin-top:10px;">'+
+            '<label class="chk"><input type="checkbox" class="e-andata"> 🚗 Andata</label>'+
+            '<label class="chk"><input type="checkbox" class="e-ritorno"> 🏠 Ritorno</label>'+
+            '<label class="chk"><input type="checkbox" class="e-chiamata"> 📞 Chiamata</label>'+
+          '</div>'+
+          '<div class="hint e-hint-viaggi hidden">Per questo lavoro non ci sono dati di viaggio (il GPS non era disponibile), quindi Andata e Ritorno non si possono attivare.</div>'+
           '<div class="row" style="margin-top:12px;">'+
             '<button class="sede-btn e-salva">✔ Salva</button>'+
             '<button class="sede-btn e-annulla">✖ Annulla</button>'+
@@ -644,6 +650,15 @@
           box.querySelector(".e-luogo").value = j.luogo || "";
           box.querySelector(".e-start").value = toLocalInput(j.start);
           box.querySelector(".e-end").value = toLocalInput(j.end);
+          const vv = j.viaggio;
+          const minLeg = vv ? (vv.minLeg || vv.minAndata || vv.minRitorno || 0) : 0;
+          const eA = box.querySelector(".e-andata"), eR = box.querySelector(".e-ritorno");
+          eA.checked = !!(vv && vv.andata);
+          eR.checked = !!(vv && vv.ritorno);
+          const senzaDatiViaggio = !minLeg;
+          eA.disabled = senzaDatiViaggio; eR.disabled = senzaDatiViaggio;
+          box.querySelector(".e-hint-viaggi").classList.toggle("hidden", !senzaDatiViaggio);
+          box.querySelector(".e-chiamata").checked = (j.chiamata||0) > 0;
         }
       });
       box.querySelector(".e-annulla").addEventListener("click", ()=> box.classList.add("hidden"));
@@ -657,6 +672,23 @@
         j.cliente = nuovoNome;
         j.luogo = box.querySelector(".e-luogo").value.trim();
         j.start = s; j.end = f;
+        // viaggi: riattiva/disattiva le tratte usando i minuti registrati dal GPS
+        const vv = j.viaggio;
+        if(vv){
+          const minLeg = vv.minLeg || vv.minAndata || vv.minRitorno || 0;
+          vv.minLeg = minLeg;
+          vv.andata = box.querySelector(".e-andata").checked;
+          vv.ritorno = box.querySelector(".e-ritorno").checked;
+          vv.minAndata = vv.andata ? minLeg : 0;
+          vv.minRitorno = vv.ritorno ? minLeg : 0;
+          vv.cost = (vv.minAndata + vv.minRitorno)/60 * (vv.rate||0);
+        }
+        // diritto di chiamata: se lo riattivi prende l'importo attuale delle impostazioni
+        if(box.querySelector(".e-chiamata").checked){
+          if(!(j.chiamata > 0)) j.chiamata = Number(cfg.chiamata)||0;
+        } else {
+          j.chiamata = 0;
+        }
         ricalcolaJob(j);
         save(LS_JOBS, jobs);
         renderList();
