@@ -209,7 +209,7 @@
 </div>
 <div id="lista"></div>
 
-<div class="ver">Sul Posto · v1.16 · 13/07/2026 · MXM</div>
+<div class="ver">Sul Posto · v1.17 · 13/07/2026 · MXM</div>
 
 <script>
 (function(){
@@ -507,7 +507,7 @@
     // I minuti "di riempimento" per arrivare allo scaglione vengono fatturati come lavoro.
     const minViaggi = v ? (v.minAndata + v.minRitorno) : 0;
     const minFatturati = billableHours(ms + minViaggi*60000) * 60;
-    const lavoroCost = (minFatturati - minViaggi)/60 * rate;
+    const lavoroCost = Math.max(0, (minFatturati - minViaggi)/60 * rate);
     const vCost = v ? v.cost : 0;
     const chiamata = active.chiamata ? (Number(cfg.chiamata)||0) : 0; // diritto fisso di chiamata (netto)
     const imponibile = chiamata + lavoroCost + vCost;
@@ -563,7 +563,7 @@
     const minViaggi = v ? ((v.minAndata||0) + (v.minRitorno||0)) : 0;
     const rate = j.rate||0;
     j.minFatturati = billableHours(j.ms + minViaggi*60000) * 60;
-    j.lavoro = (j.minFatturati - minViaggi)/60 * rate;
+    j.lavoro = Math.max(0, (j.minFatturati - minViaggi)/60 * rate); // mai negativo (es. arrivo = fine, zero lavoro)
     j.imponibile = (j.chiamata||0) + j.lavoro + (v ? (v.cost||0) : 0);
     j.iva = j.imponibile * (j.ivaP||0)/100;
     j.totale = j.imponibile + j.iva;
@@ -666,7 +666,7 @@
         const s = new Date(box.querySelector(".e-start").value).getTime();
         const f = new Date(box.querySelector(".e-end").value).getTime();
         if(isNaN(s) || isNaN(f)){ alert("Controlla gli orari di arrivo e fine."); return; }
-        if(f <= s){ alert("L'orario di fine deve essere dopo l'arrivo."); return; }
+        if(f < s){ alert("L'orario di fine non può essere prima dell'arrivo."); return; }
         const nuovoNome = box.querySelector(".e-cliente").value.trim();
         if(!nuovoNome){ alert("Il nome del cliente non può restare vuoto."); return; }
         j.cliente = nuovoNome;
