@@ -36,6 +36,7 @@
     font-size:17px; padding:13px 14px; border-radius:12px; outline:none;
   }
   input:focus{border-color:var(--accent);}
+  input.err{border-color:var(--red);}
 
   /* checkbox dei viaggi */
   .trips{display:flex; gap:8px; margin-top:12px;}
@@ -433,10 +434,17 @@
   }
 
   // ---- azione principale ----
+  clienteEl.addEventListener("input", ()=> clienteEl.classList.remove("err"));
   mainBtn.addEventListener("click", ()=>{
     if(!active){
-      // ARRIVO
-      const nome = clienteEl.value.trim() || "Senza nome";
+      // ARRIVO — il nome del cliente/lavoro è obbligatorio
+      const nome = clienteEl.value.trim();
+      if(!nome){
+        clienteEl.classList.add("err");
+        clienteEl.focus();
+        alert("Prima scrivi il nome del cliente o del lavoro.");
+        return;
+      }
       let andata = chkAndata.checked, ritorno = chkRitorno.checked;
       if((andata||ritorno) && !cfg.sede){
         alert("Per contare i viaggi devi prima salvare la posizione della sede:\n⚙ Modifica → 📍 Salva posizione sede (mentre sei in sede).\n\nQuesto lavoro parte SENZA viaggi.");
