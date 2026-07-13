@@ -209,7 +209,7 @@
 </div>
 <div id="lista"></div>
 
-<div class="ver">Sul Posto · v1.18 · 13/07/2026 · MXM</div>
+<div class="ver">Sul Posto · v1.19 · 13/07/2026 · MXM</div>
 
 <script>
 (function(){
@@ -365,16 +365,22 @@
     }, {enableHighAccuracy:true, timeout:15000, maximumAge:60000});
   });
   // ricerca dell'indirizzo della sede (OpenStreetMap/Nominatim — serve internet solo qui)
+  // ricerca indirizzo generica (OpenStreetMap/Nominatim): risolve con la lista dei risultati,
+  // o con [] se non trova nulla / non c'è internet. Usata sia per la sede globale che per la
+  // partenza di un singolo lavoro.
+  function cercaIndirizzoGenerico(q){
+    return fetch("https://nominatim.openstreetmap.org/search?format=json&limit=3&accept-language=it&q="+encodeURIComponent(q))
+      .then(r=>r.json())
+      .catch(()=>[]);
+  }
   function cercaIndirizzo(){
     const q = $("sedeIndirizzo").value.trim();
     if(!q){ alert("Scrivi l'indirizzo della sede, es. Via Roma 5, Milano"); return; }
     const box = $("sedeRisultati");
     box.innerHTML = '<div class="hint">🔎 Cerco l\'indirizzo…</div>';
-    fetch("https://nominatim.openstreetmap.org/search?format=json&limit=3&accept-language=it&q="+encodeURIComponent(q))
-      .then(r=>r.json())
-      .then(res=>{
+    cercaIndirizzoGenerico(q).then(res=>{
         if(!res.length){
-          box.innerHTML = '<div class="hint">Nessun risultato: prova ad aggiungere la città o il CAP.</div>';
+          box.innerHTML = '<div class="hint">Nessun risultato: prova ad aggiungere la città o il CAP. (Serve internet per cercare.)</div>';
           return;
         }
         box.innerHTML = '<div class="hint">Tocca quello giusto:</div>';
@@ -394,9 +400,6 @@
           });
           box.appendChild(b);
         });
-      })
-      .catch(()=>{
-        box.innerHTML = '<div class="hint">⚠ Non riesco a cercare: serve internet per questa ricerca. Riprova.</div>';
       });
   }
   $("sedeCercaBtn").addEventListener("click", cercaIndirizzo);
@@ -518,6 +521,7 @@
       cliente: active.cliente,
       luogo: "",
       pos: active.pos || null,
+      partenza: v ? (cfg.sede ? {lat:cfg.sede.lat, lon:cfg.sede.lon, nome:cfg.sede.nome||null} : null) : null,
       start: active.start, end: end, ms: ms,
       rate: rate, ivaP: ivaP,
       chiamata: chiamata,
@@ -628,6 +632,14 @@
             '<label class="chk"><input type="checkbox" class="e-chiamata"> 📞 Chiamata</label>'+
           '</div>'+
           '<div class="hint e-hint-viaggi hidden">Per questo lavoro non ci sono dati di viaggio (il GPS non era disponibile), quindi Andata e Ritorno non si possono attivare.</div>'+
+          '<div class="e-partenza-box hidden" style="margin-top:14px; border-top:1px dashed var(--line); padding-top:10px;">'+
+            '<label>Partenza di questa lavorazione</label>'+
+            '<div class="hint e-partenza-attuale"></div>'+
+            '<input type="text" class="e-partenza-input" placeholder="Es. Via Roma 5, Milano" style="margin-top:8px;">'+
+            '<div class="row" style="margin-top:8px;"><button class="sede-btn e-partenza-cerca">🔎 Cerca indirizzo</button></div>'+
+            '<div class="e-partenza-risultati"></div>'+
+            '<div class="hint">Cambia il punto di partenza <b>solo per questo lavoro</b>: la sede predefinita per gli altri resta quella di sempre.</div>'+
+          '</div>'+
           '<div class="row" style="margin-top:12px;">'+
             '<button class="sede-btn e-salva">✔ Salva</button>'+
             '<button class="sede-btn e-annulla">✖ Annulla</button>'+
@@ -664,8 +676,62 @@
           eA.disabled = senzaDatiViaggio; eR.disabled = senzaDatiViaggio;
           box.querySelector(".e-hint-viaggi").classList.toggle("hidden", !senzaDatiViaggio);
           box.querySelector(".e-chiamata").checked = (j.chiamata||0) > 0;
+          // partenza modificabile solo se il lavoro ha già dati di viaggio (serve la posizione del cliente)
+          const partenzaBox = box.querySelector(".e-partenza-box");
+          partenzaBox.classList.toggle("hidden", senzaDatiViaggio || !j.pos);
+          if(!senzaDatiViaggio && j.pos){
+            box.querySelector(".e-partenza-attuale").textContent =
+              "Partenza attuale: " + (j.partenza && j.partenza.nome ? j.partenza.nome : (cfg.sede && cfg.sede.nome ? cfg.sede.nome+" (sede predefinita)" : "sconosciuta"));
+            box.querySelector(".e-partenza-input").value = "";
+            box.querySelector(".e-partenza-risultati").innerHTML = "";
+          }
         }
       });
+      // ricerca e ricalcolo della partenza SOLO per questo lavoro (la sede globale non cambia)
+      const ePartCerca = box.querySelector(".e-partenza-cerca");
+      const ePartInput = box.querySelector(".e-partenza-input");
+      const ePartRis = box.querySelector(".e-partenza-risultati");
+      function cercaPartenzaJob(){
+        const q = ePartInput.value.trim();
+        if(!q){ alert("Scrivi l'indirizzo di partenza, es. Via Roma 5, Milano"); return; }
+        ePartRis.innerHTML = '<div class="hint">🔎 Cerco l\'indirizzo…</div>';
+        cercaIndirizzoGenerico(q).then(res=>{
+          if(!res.length){
+            ePartRis.innerHTML = '<div class="hint">Nessun risultato: prova ad aggiungere la città o il CAP. (Serve internet.)</div>';
+            return;
+          }
+          ePartRis.innerHTML = '<div class="hint">Tocca quello giusto:</div>';
+          res.forEach(r=>{
+            const b = document.createElement("button");
+            b.className = "sede-res";
+            b.textContent = "📌 " + r.display_name;
+            b.addEventListener("click", async ()=>{
+              const nuovaPartenza = { lat: parseFloat(r.lat), lon: parseFloat(r.lon), nome: r.display_name.split(",").slice(0,3).join(",") };
+              ePartRis.innerHTML = '<div class="hint">🗺 Calcolo il nuovo percorso…</div>';
+              let route = await percorsoReale(nuovaPartenza, j.pos);
+              const vv = j.viaggio;
+              let km, minLeg, metodo;
+              if(route){ km = route.km; minLeg = route.min; metodo = "percorso"; }
+              else {
+                km = kmTra(nuovaPartenza, j.pos) * ROAD_FACTOR;
+                minLeg = km / Math.max(5, Number(cfg.speed)||50) * 60;
+                metodo = "stima";
+              }
+              j.partenza = nuovaPartenza;
+              vv.minLeg = minLeg; vv.km = km; vv.metodo = metodo;
+              vv.minAndata = vv.andata ? minLeg : 0;
+              vv.minRitorno = vv.ritorno ? minLeg : 0;
+              vv.cost = (vv.minAndata + vv.minRitorno)/60 * (vv.rate||0);
+              ricalcolaJob(j);
+              save(LS_JOBS, jobs);
+              renderList();
+            });
+            ePartRis.appendChild(b);
+          });
+        });
+      }
+      ePartCerca.addEventListener("click", cercaPartenzaJob);
+      ePartInput.addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); cercaPartenzaJob(); } });
       box.querySelector(".e-annulla").addEventListener("click", ()=> box.classList.add("hidden"));
       box.querySelector(".e-salva").addEventListener("click", ()=>{
         const s = new Date(box.querySelector(".e-start").value).getTime();
