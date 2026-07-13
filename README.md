@@ -30,7 +30,7 @@ Arrivi e premi **Arrivo**, finisci e premi **Finito** — l'app fa i conti da so
 3. In ⚙ imposta tariffa e **posizione della sede**, poi: **Arrivo** all'inizio, **Finito** alla fine
 
 ## 👤 Autore
-**Maximiliano Marchesi**
+**Maximiliano Marchesi** · *MXM*
 
 ## 🤝 Trasparenza
 Ho realizzato questo progetto **facendomi aiutare dall'intelligenza artificiale** (Claude). Scelgo di dichiararlo apertamente, con parole mie: per me la trasparenza conta, e sto imparando a programmare costruendo progetti veri e capendo cosa c'è dietro.
