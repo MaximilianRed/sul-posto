@@ -269,7 +269,9 @@
     finally{ clearTimeout(t); }
   }
   // calcolo dei viaggi: usa il percorso reale se disponibile, altrimenti la stima
-  // in linea d'aria ×1.3 alla velocità media (null se non richiesti o senza GPS)
+  // in linea d'aria ×1.3 alla velocità media (null se non richiesti o senza GPS).
+  // Ogni tratta viene arrotondata allo stesso scaglione del lavoro (⚙ Arrotonda a),
+  // cosi' andata/lavoro/ritorno sono sempre blocchi puliti e il totale pure.
   function calcViaggio(route){
     if(!active || !(active.andata||active.ritorno) || !active.pos || !cfg.sede) return null;
     let km, minLeg, metodo;
@@ -281,6 +283,7 @@
       minLeg = km/speed*60;
       metodo = "stima";
     }
+    minLeg = billableHours(minLeg*60000) * 60; // arrotonda la tratta allo scaglione impostato
     const legs = (active.andata?1:0) + (active.ritorno?1:0);
     const tRate = Number(cfg.travelRate)||0;
     return {
