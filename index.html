@@ -41,7 +41,7 @@
   input.err{border-color:var(--red);}
 
   /* checkbox dei viaggi */
-  .trips{display:flex; gap:8px; margin-top:12px;}
+  .trips{display:flex; flex-wrap:wrap; gap:8px; margin-top:12px;}
   .chk{display:flex; flex:1; align-items:center; gap:8px; background:var(--card2);
     border:1px solid var(--line); border-radius:12px; padding:12px; font-size:15px;
     color:var(--text); cursor:pointer; user-select:none; margin-bottom:0;}
@@ -125,6 +125,7 @@
   <div class="trips" id="tripsRow">
     <label class="chk"><input type="checkbox" id="chkAndata" checked> 🚗 Andata</label>
     <label class="chk"><input type="checkbox" id="chkRitorno" checked> 🏠 Ritorno</label>
+    <label class="chk"><input type="checkbox" id="chkChiamata" checked> 📞 Chiamata</label>
   </div>
 
   <div class="timer idle" id="timer">00:00:00</div>
@@ -147,11 +148,17 @@
         <input type="number" id="iva" inputmode="decimal" min="0" step="1" value="22">
       </div>
     </div>
-    <div style="margin-top:10px;">
-      <label for="arrotonda">Arrotonda a (minuti)</label>
-      <input type="number" id="arrotonda" inputmode="numeric" min="0" step="1" value="15">
+    <div class="row" style="margin-top:10px;">
+      <div>
+        <label for="arrotonda">Arrotonda a (minuti)</label>
+        <input type="number" id="arrotonda" inputmode="numeric" min="0" step="1" value="15">
+      </div>
+      <div>
+        <label for="chiamata">Diritto di chiamata (€)</label>
+        <input type="number" id="chiamata" inputmode="decimal" min="0" step="1" value="20">
+      </div>
     </div>
-    <div class="hint">Arrotonda a 15 = fatturi a quarti d'ora. L'arrotondamento si applica <b>una volta sola sul tempo totale</b> (viaggi + lavoro), non alle singole voci. Metti 0 per il tempo esatto.</div>
+    <div class="hint">Arrotonda a 15 = fatturi a quarti d'ora. L'arrotondamento si applica <b>una volta sola sul tempo totale</b> (viaggi + lavoro), non alle singole voci. Metti 0 per il tempo esatto. Il <b>diritto di chiamata</b> è l'importo fisso per ogni uscita (netto, l'IVA si aggiunge): si addebita quando la casella 📞 è spuntata.</div>
 
     <div class="row" style="margin-top:14px;">
       <div>
@@ -202,7 +209,7 @@
 </div>
 <div id="lista"></div>
 
-<div class="ver">Sul Posto · v1.14 · 13/07/2026 · MXM</div>
+<div class="ver">Sul Posto · v1.15 · 13/07/2026 · MXM</div>
 
 <script>
 (function(){
@@ -215,9 +222,9 @@
   const $ = id => document.getElementById(id);
   const timerEl = $("timer"), subEl = $("subText"), mainBtn = $("mainBtn"),
         clienteEl = $("cliente"), dot = $("statusDot"),
-        chkAndata = $("chkAndata"), chkRitorno = $("chkRitorno");
+        chkAndata = $("chkAndata"), chkRitorno = $("chkRitorno"), chkChiamata = $("chkChiamata");
 
-  const DEFAULTS = {rate:60, round:15, iva:22, travelRate:60, speed:50, sede:null, v:2};
+  const DEFAULTS = {rate:60, round:15, iva:22, travelRate:60, speed:50, chiamata:20, sede:null, v:2};
   let cfg = load(LS_CFG, null);
   if(!cfg || cfg.v !== 2){ cfg = Object.assign({}, DEFAULTS); }
   else { cfg = Object.assign({}, DEFAULTS, cfg); } // aggiunge i campi nuovi alle config vecchie
@@ -313,6 +320,7 @@
   $("arrotonda").value = cfg.round;
   $("travelRate").value = cfg.travelRate;
   $("speed").value = cfg.speed;
+  $("chiamata").value = cfg.chiamata;
   function refreshRateLabel(){
     $("rateLabel").textContent = (Number(cfg.rate)||0)+" €/h + IVA "+(Number(cfg.iva)||0)+"%";
   }
@@ -335,6 +343,7 @@
   $("arrotonda").addEventListener("input", e=>{ cfg.round = parseInt(e.target.value)||0; save(LS_CFG,cfg); if(active) updateTimer(); });
   $("travelRate").addEventListener("input", e=>{ cfg.travelRate = parseFloat(e.target.value)||0; save(LS_CFG,cfg); });
   $("speed").addEventListener("input", e=>{ cfg.speed = parseInt(e.target.value)||0; save(LS_CFG,cfg); });
+  $("chiamata").addEventListener("input", e=>{ cfg.chiamata = parseFloat(e.target.value)||0; save(LS_CFG,cfg); if(active) updateTimer(); });
 
   // ---- GPS ----
   function gpsErrText(err){
@@ -410,8 +419,9 @@
     const ms = Date.now() - active.start;
     timerEl.textContent = fmtDur(ms);
     const w = calcLavoro(ms);
+    const fee = active.chiamata ? (Number(cfg.chiamata)||0) : 0;
     const trips = (active.andata||active.ritorno) ? "  ·  🚗 viaggi al termine" : "";
-    subEl.innerHTML = "In corso · <b>"+euro(w.imponibile)+"</b> + IVA"+trips;
+    subEl.innerHTML = "In corso · <b>"+euro(w.imponibile + fee)+"</b> + IVA"+trips;
   }
 
   function renderActiveState(){
@@ -420,6 +430,7 @@
       clienteEl.disabled = true;
       chkAndata.checked = !!active.andata;  chkAndata.disabled = true;
       chkRitorno.checked = !!active.ritorno; chkRitorno.disabled = true;
+      chkChiamata.checked = !!active.chiamata; chkChiamata.disabled = true;
       document.querySelectorAll(".chk").forEach(e=>e.classList.add("disab"));
       timerEl.classList.remove("idle");
       dot.classList.add("live");
@@ -429,7 +440,7 @@
       startTick();
     } else {
       clienteEl.disabled = false;
-      chkAndata.disabled = false; chkRitorno.disabled = false;
+      chkAndata.disabled = false; chkRitorno.disabled = false; chkChiamata.disabled = false;
       document.querySelectorAll(".chk").forEach(e=>e.classList.remove("disab"));
       timerEl.classList.add("idle");
       timerEl.textContent = "00:00:00";
@@ -459,7 +470,7 @@
         alert("Per contare i viaggi devi prima salvare la posizione della sede:\n⚙ Modifica → 📍 Salva posizione sede (mentre sei in sede).\n\nQuesto lavoro parte SENZA viaggi.");
         andata = false; ritorno = false;
       }
-      active = { cliente: nome, start: Date.now(), andata: andata, ritorno: ritorno, pos: null };
+      active = { cliente: nome, start: Date.now(), andata: andata, ritorno: ritorno, chiamata: chkChiamata.checked, pos: null };
       save(LS_ACTIVE, active);
       readClientPos(); // legge sempre la posizione: serve per i viaggi e per il luogo del cliente
       renderActiveState();
@@ -498,7 +509,8 @@
     const minFatturati = billableHours(ms + minViaggi*60000) * 60;
     const lavoroCost = (minFatturati - minViaggi)/60 * rate;
     const vCost = v ? v.cost : 0;
-    const imponibile = lavoroCost + vCost;
+    const chiamata = active.chiamata ? (Number(cfg.chiamata)||0) : 0; // diritto fisso di chiamata (netto)
+    const imponibile = chiamata + lavoroCost + vCost;
     const iva = imponibile * ivaP/100;
     const gpsFallito = (active.andata||active.ritorno) && !v;
     const job = {
@@ -508,6 +520,7 @@
       pos: active.pos || null,
       start: active.start, end: end, ms: ms,
       rate: rate, ivaP: ivaP,
+      chiamata: chiamata,
       lavoro: lavoroCost,
       minFatturati: minFatturati,
       viaggio: v,
@@ -519,7 +532,7 @@
     active = null;
     localStorage.removeItem(LS_ACTIVE);
     clienteEl.value = "";
-    chkAndata.checked = true; chkRitorno.checked = true;
+    chkAndata.checked = true; chkRitorno.checked = true; chkChiamata.checked = true;
     renderActiveState();
     renderList();
     if(gpsFallito) alert("⚠ Non sono riuscito a leggere il GPS: lavoro salvato SENZA viaggi.\nPuoi aggiungerli a mano in fattura.");
@@ -551,7 +564,7 @@
     const rate = j.rate||0;
     j.minFatturati = billableHours(j.ms + minViaggi*60000) * 60;
     j.lavoro = (j.minFatturati - minViaggi)/60 * rate;
-    j.imponibile = j.lavoro + (v ? (v.cost||0) : 0);
+    j.imponibile = (j.chiamata||0) + j.lavoro + (v ? (v.cost||0) : 0);
     j.iva = j.imponibile * (j.ivaP||0)/100;
     j.totale = j.imponibile + j.iva;
   }
@@ -579,6 +592,7 @@
       const riga = (nome, tempo, importo) =>
         '<div class="brk"><span class="l">'+nome+'</span><span class="t">'+tempo+'</span><span class="c">'+importo+'</span></div>';
       let brkHtml = "";
+      if(j.chiamata) brkHtml += riga("📞 Chiamata", "fisso", euro(j.chiamata));
       if(v && v.andata) brkHtml += riga("🚗 Andata", Math.round(v.minAndata)+" min", euro(v.minAndata/60*(v.rate||0)));
       brkHtml += riga("🔧 Lavoro", fmtDur(j.ms), euro(j.lavoro!=null ? j.lavoro : (j.imponibile||0)));
       if(v && v.ritorno) brkHtml += riga("🏠 Ritorno", Math.round(v.minRitorno)+" min", euro(v.minRitorno/60*(v.rate||0)));
@@ -691,7 +705,7 @@
   $("exportBtn").addEventListener("click", ()=>{
     if(jobs.length===0){ alert("Nessun dato da esportare."); return; }
     const num = n => (Math.round(n*100)/100).toFixed(2).replace(".",",");
-    const rows = [["Cliente","Luogo","Inizio","Fine","Durata lavoro","Tariffa €/h","Lavoro €","Viaggio min","Viaggio km","Viaggio €","Viaggio calcolo","Imponibile €","IVA %","IVA €","Totale €"]];
+    const rows = [["Cliente","Luogo","Inizio","Fine","Durata lavoro","Tariffa €/h","Chiamata €","Lavoro €","Viaggio min","Viaggio km","Viaggio €","Viaggio calcolo","Imponibile €","IVA %","IVA €","Totale €"]];
     jobs.slice().reverse().forEach(j=>{
       const v = j.viaggio;
       rows.push([
@@ -701,6 +715,7 @@
         new Date(j.end).toLocaleString("it-IT"),
         fmtDur(j.ms),
         String(j.rate||0).replace(".",","),
+        num(j.chiamata||0),
         num(j.lavoro!=null ? j.lavoro : (j.imponibile||0)),
         v ? String(Math.round(v.minAndata+v.minRitorno)) : "0",
         v ? num(v.km) : "0",
