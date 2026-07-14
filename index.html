@@ -209,7 +209,7 @@
 </div>
 <div id="lista"></div>
 
-<div class="ver">Sul Posto · v1.20 · 13/07/2026 · MXM</div>
+<div class="ver">Sul Posto · v1.21 · 13/07/2026 · MXM</div>
 
 <script>
 (function(){
@@ -597,20 +597,35 @@
         '<div class="brk"><span class="l">'+nome+'</span><span class="t">'+tempo+'</span><span class="c">'+importo+'</span></div>';
       let brkHtml = "";
       if(j.chiamata) brkHtml += riga("📞 Chiamata", "fisso", euro(j.chiamata));
-      if(v && v.andata) brkHtml += riga("🚗 Andata", Math.round(v.minAndata)+" min", euro(v.minAndata/60*(v.rate||0)));
       // «Lavoro» mostra SOLO il tempo e il costo REALI (il cronometro grezzo, senza padding).
-      // L'arrotondamento al quarto d'ora si fa DOPO, come voce a parte «⏱ Arrotondamento» —
-      // così non finisce mai mescolato dentro il costo del lavoro vero.
+      // Il "riempimento" per arrivare allo scaglione di 15 minuti non si vede come voce a parte:
+      // se ci sono viaggi lo assorbono loro (proporzionalmente, in silenzio) — altrimenti,
+      // in assenza di viaggi, il tempo di lavoro reale VIENE arrotondato direttamente (comportamento
+      // di sempre: es. 47 min → fatturi 60 min, senza bisogno di spiegare nessun "resto").
       const rateLav = Number(j.rate)||0;
       const lavoroRealeMin = j.ms/60000;
       const lavoroRealeCost = lavoroRealeMin/60*rateLav;
-      brkHtml += riga("🔧 Lavoro", fmtDur(j.ms), euro(lavoroRealeCost));
-      if(v && v.ritorno) brkHtml += riga("🏠 Ritorno", Math.round(v.minRitorno)+" min", euro(v.minRitorno/60*(v.rate||0)));
       const bucketLavoro = j.lavoro!=null ? j.lavoro : (j.imponibile||0);
       const arrotondamentoCost = Math.max(0, bucketLavoro - lavoroRealeCost);
-      if(arrotondamentoCost > 0.005){
-        const arrotondamentoMin = rateLav>0 ? arrotondamentoCost/(rateLav/60) : 0;
-        brkHtml += riga("⏱ Arrotondamento", fmtMin(arrotondamentoMin)+" a scaglione", euro(arrotondamentoCost));
+      const baseAndata = (v && v.andata) ? v.minAndata/60*(v.rate||0) : 0;
+      const baseRitorno = (v && v.ritorno) ? v.minRitorno/60*(v.rate||0) : 0;
+      const sumBase = baseAndata + baseRitorno;
+      if(sumBase > 0){
+        // c'è un viaggio da mostrare: il riempimento va lì, diviso in proporzione tra le tratte attive
+        if(v.andata){
+          const c = baseAndata + arrotondamentoCost*(baseAndata/sumBase);
+          const m = (v.rate>0) ? c/(v.rate/60) : v.minAndata;
+          brkHtml += riga("🚗 Andata", Math.round(m)+" min", euro(c));
+        }
+        brkHtml += riga("🔧 Lavoro", fmtDur(j.ms), euro(lavoroRealeCost));
+        if(v.ritorno){
+          const c = baseRitorno + arrotondamentoCost*(baseRitorno/sumBase);
+          const m = (v.rate>0) ? c/(v.rate/60) : v.minRitorno;
+          brkHtml += riga("🏠 Ritorno", Math.round(m)+" min", euro(c));
+        }
+      } else {
+        // nessun viaggio da mostrare: il tempo di lavoro reale viene arrotondato come sempre
+        brkHtml += riga("🔧 Lavoro", fmtDur(j.ms), euro(bucketLavoro));
       }
       let tripHtml = "";
       if(v && (v.andata || v.ritorno)){
