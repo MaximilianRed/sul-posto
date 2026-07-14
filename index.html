@@ -209,7 +209,7 @@
 </div>
 <div id="lista"></div>
 
-<div class="ver">Sul Posto · v1.23 · 14/07/2026 · MXM</div>
+<div class="ver">Sul Posto · v1.24 · 14/07/2026 · MXM</div>
 
 <script>
 (function(){
@@ -259,6 +259,17 @@
     if(h>0 && m>0) return ore+" e "+minuti;
     if(h>0) return ore;
     return minuti;
+  }
+  // tempo fatturato in quarti d'ora, come si dice a voce: "un quarto d'ora",
+  // "mezz'ora", "tre quarti d'ora", "1 ora e un quarto", "1 ora e mezza", "2 ore"
+  function fmtQuarti(min){
+    min = Math.round(min);
+    if(min < 15 || min % 15 !== 0) return fmtMin(min); // scaglioni diversi dal quarto d'ora
+    const h = Math.floor(min/60), q = (min%60)/15;
+    const frazione = ["", "un quarto", "mezza", "tre quarti"][q];
+    if(h === 0) return q === 2 ? "mezz'ora" : frazione+" d'ora";
+    const ore = h === 1 ? "1 ora" : h+" ore";
+    return q ? ore+" e "+frazione : ore;
   }
   // distanza in km tra due punti GPS (formula dell'emisenoverso)
   function kmTra(a, b){
@@ -605,7 +616,7 @@
       // Ogni voce mostra SOLO i propri valori REALI: minuti veri e costi veri, niente
       // riempimenti spalmati qua e là. L'arrotondamento allo scaglione (regola del cliente:
       // "l'arrotondamento lo fai dopo") si applica UNA volta, alla fine, sul totale —
-      // ed è leggibile nella riga «⏱ Fatturato X min · Imponibile Y €» sotto le voci.
+      // ed è leggibile nella riga «⏱ Fatturato … (reali: …)» sotto le voci.
       const rateLav = Number(j.rate)||0;
       if(j.chiamata) brkHtml += riga("📞 Chiamata", "fisso", euro(j.chiamata));
       if(v && v.andata) brkHtml += riga("🚗 Andata", fmtMin(v.minAndata), euro(v.minAndata/60*(v.rate||0)));
@@ -622,7 +633,9 @@
         brkHtml+
         '<div class="meta">'+
           tripHtml+
-          '<div class="iva">'+(j.minFatturati ? "⏱ Fatturato "+fmtMin(j.minFatturati)+"  ·  " : "")+'Imponibile '+euro(j.imponibile||0)+'  ·  + IVA '+(j.ivaP||0)+'% '+euro(j.iva||0)+'</div>'+
+          '<div class="iva">'+(j.minFatturati ? "⏱ Fatturato "+fmtQuarti(j.minFatturati)
+            +" (reali: "+fmtMin(j.ms/60000 + (v ? (v.minAndata||0)+(v.minRitorno||0) : 0))+")<br>" : "")
+            +'Imponibile '+euro(j.imponibile||0)+'  ·  + IVA '+(j.ivaP||0)+'% '+euro(j.iva||0)+'</div>'+
         '</div>'+
         '<div class="delrow"><button class="edit">✏ Modifica</button><button class="del">Elimina</button></div>'+
         '<div class="editbox hidden">'+
