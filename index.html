@@ -210,7 +210,7 @@
 </div>
 <div id="lista"></div>
 
-<div class="ver">Sul Posto · v1.29 · 15/07/2026 · MXM</div>
+<div class="ver">Sul Posto · v1.30 · 15/07/2026 · MXM</div>
 
 <script>
 (function(){
@@ -646,9 +646,9 @@
           tripHtml+
           '<div class="iva">'+(j.minFatturati ? "⏱ : "
             +(q => q.charAt(0).toUpperCase()+q.slice(1))(fmtQuarti(j.minFatturati))
-            +" "+euro((j.imponibile||0)-(j.chiamata||0))+"+iva"
+            +" "+euro((j.imponibile||0)-(j.chiamata||0))
             +" ("+fmtMinBrevi(j.ms/60000 + (v ? (v.minAndata||0)+(v.minRitorno||0) : 0))+")"
-            +(j.chiamata ? " + D.F.C. "+euro(j.chiamata)+"+iva" : "")+"<br>" : "")
+            +(j.chiamata ? " + "+euro(j.chiamata) : "")+"<br>" : "")
             +'Intervento: '+euro(j.imponibile||0)+' + IVA '+(j.ivaP||0)+'% '+euro(j.iva||0)+'  ·  Totale: '+euro(j.totale||0)+'</div>'+
         '</div>'+
         '<div class="delrow"><button class="edit">✏ Modifica</button><button class="del">Elimina</button></div>'+
