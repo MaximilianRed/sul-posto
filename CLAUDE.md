@@ -18,6 +18,7 @@ I dati stanno nel `localStorage` del browser, con queste chiavi:
 | `segnaore_jobs` | tutti i lavori registrati |
 | `segnaore_cfg` | impostazioni (tariffe, sede, chiave TomTom) |
 | `segnaore_active` | il lavoro in corso, se c'è |
+| `segnaore_pausa` | i lavori messi in pausa (dalla v1.33) |
 
 ⚠️ **Non rinominare queste chiavi**: il telefono ha già dei dati salvati con questi nomi.
 Stesso motivo per cui **non si cambia l'indirizzo del sito** senza prima fare un backup
@@ -41,6 +42,9 @@ tariffa viaggio 60 €/h, velocità media 50 km/h, diritto di chiamata 20 € ne
 3. **Ogni pubblicazione alza il numero di versione** in fondo alla pagina
    (`Sul Posto · v1.N · GG/MM/AAAA · MXM`). Serve all'utente per capire se il telefono
    si è aggiornato. N = numero di commit di quella versione.
+   *Nota:* il conteggio è sfasato di due (un commit vuoto per rilanciare Netlify e il
+   commit di sola documentazione di `CLAUDE.md`): la v1.33 è il commit 35. Si prosegue
+   dalla versione precedente **+1** a ogni pubblicazione.
 4. **La firma è MXM**: va tenuta nel piè di pagina e nel README.
 5. **Niente riga `Co-Authored-By: Claude` nei commit.** L'uso dell'IA è dichiarato, ma
    **in prima persona dall'autore**, nella sezione «Trasparenza» del README: deve essere
@@ -52,6 +56,7 @@ tariffa viaggio 60 €/h, velocità media 50 km/h, diritto di chiamata 20 € ne
 ## Come si calcola il conto
 
 ```
+minuti lavoro   = somma dei periodi lavorati      (le pause non contano; senza pause = fine − arrivo)
 minuti viaggi   = minAndata + minRitorno          (grezzi, come registrati)
 minuti fatturati = arrotonda(lavoro + viaggi)      (un solo arrotondamento, a 15 min)
 costo lavoro    = (minuti fatturati − minuti viaggi) / 60 × tariffa   (mai negativo)
@@ -79,6 +84,36 @@ In ✏ Modifica si possono correggere a mano **minuti di andata, di ritorno e km
 cambiare **l'indirizzo di partenza di quel singolo lavoro** senza toccare la sede
 predefinita degli altri.
 
+## La pausa (v1.33)
+
+Serve per i lavori che durano più giorni, e per la pausa pranzo.
+
+- **⏸ Pausa** chiude il periodo in corso e mette il lavoro da parte, nel riquadro
+  «In pausa». L'app torna libera: intanto si possono registrare altri lavori, e si possono
+  avere più lavori in pausa insieme.
+- **▶ Riprendi** apre un periodo nuovo. **Un solo cronometro acceso alla volta:** se ce
+  n'è già uno acceso, va in pausa da solo. Ripresa entro un minuto = nessun periodo nuovo.
+- **■ Finito su un lavoro in pausa** lo chiude all'ora della pausa, non all'ora del tocco,
+  e **non rilegge il GPS** (si potrebbe essere già altrove).
+- All'**Arrivo**, se lo stesso nome è già in pausa, l'app chiede se riprendere quello.
+- **Viaggi e chiamata si contano una volta sola per lavoro**, anche se dura più giorni:
+  scelta dell'utente. Un secondo viaggio si aggiunge a mano in ✏ Modifica.
+- L'arrotondamento resta **uno solo, alla fine**, sulla somma dei periodi più i viaggi.
+
+Come è salvato: ogni periodo è un «pezzo» `{start, end}` nella lista `pezzi`. Il lavoro in
+corso ha l'ultimo pezzo aperto (`end: null`); un lavoro in corso salvato dalla v1.32 non ha
+`pezzi` e all'avvio diventa un pezzo solo. Nei lavori finiti `pezzi` c'è **solo se sono più
+di uno**: un lavoro senza pause si salva esattamente come prima. `start` = primo arrivo,
+`end` = ultima fine, `ms` = somma dei pezzi.
+
+In ✏ Modifica c'è una coppia Inizio/Fine per ogni periodo, così si corregge una pausa
+dimenticata. Gli orari non toccati conservano i secondi registrati; i controlli (fine prima
+dell'inizio, periodi sovrapposti) si fanno al minuto, cioè su quello che si vede.
+
+Backup: campo `inPausa` (i backup vecchi non ce l'hanno: ripristinandoli non resta nessun
+lavoro in pausa). CSV: colonna **«Periodi di lavoro»** aggiunta in fondo, le altre non si
+sono spostate.
+
 ## Provare le modifiche
 
 ```bash
@@ -96,5 +131,6 @@ quindi meglio **raggruppare le modifiche** invece di pubblicare a ogni virgola.
 
 ## Cose discusse ma non ancora fatte
 
-Pausa pranzo da scalare, costo dei materiali, elenco clienti abituali, note per
-lavorazione, totale mensile, sincronizzazione tra telefono e PC (servirebbe un server).
+Costo dei materiali, elenco clienti abituali, note per lavorazione, totale mensile,
+sincronizzazione tra telefono e PC (servirebbe un server). La pausa pranzo si fa con
+⏸ Pausa (v1.33).

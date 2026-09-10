@@ -63,9 +63,22 @@
   .bigbtn.arrivo{background:linear-gradient(180deg,var(--green),var(--green-d));}
   .bigbtn.finito{background:linear-gradient(180deg,var(--red),var(--red-d));}
   .bigbtn:disabled{opacity:.7;}
+  .bigbtn.pausa{background:linear-gradient(180deg,#f59e0b,#d97706);}
+  .btnrow{display:flex; gap:10px;}
+  .btnrow .bigbtn{flex:1; width:auto;}
+
+  /* lavori in pausa */
+  .paused{background:var(--card2); border:1px solid var(--line); border-radius:12px; padding:11px 12px; margin-top:10px;}
+  .paused .name{font-weight:600; font-size:16px;}
+  .paused .info{color:var(--muted); font-size:12.5px; margin-top:3px; line-height:1.5;}
+  .paused .row{margin-top:10px;}
+  .smallbtn{padding:12px; border-radius:12px; font-size:16px; font-weight:700; color:#fff;}
+  .smallbtn.riprendi{background:linear-gradient(180deg,var(--green),var(--green-d));}
+  .smallbtn.chiudi{background:linear-gradient(180deg,var(--red),var(--red-d));}
+  .smallbtn:disabled{opacity:.6;}
 
   .row{display:flex; gap:10px;}
-  .row > *{flex:1;}
+  .row > *{flex:1; min-width:0;} /* senza min-width i campi data/ora uscivano dallo schermo */
 
   .summary{display:flex; gap:10px; margin-bottom:16px;}
   .stat{flex:1; background:var(--card); border:1px solid var(--line); border-radius:14px; padding:12px 8px; text-align:center;}
@@ -96,6 +109,9 @@
   .job .edit{background:none; color:var(--accent); font-size:13px; padding:4px 6px;}
   .job .editbox{margin-top:10px; border-top:1px dashed var(--line); padding-top:4px;}
   .job .editbox label{margin-top:10px;}
+  .job .e-pezzo-tit{font-size:12px; color:var(--accent); font-weight:600; margin-top:14px;}
+  .job .e-pezzo .row{flex-wrap:wrap; column-gap:10px;} /* sul telefono Inizio e Fine vanno uno sotto l'altro: affiancati non si legge l'ora */
+  .job .e-pezzo .row > *{flex:1 1 200px;}
   .empty{color:var(--muted); text-align:center; padding:24px 0; font-size:14px;}
 
   .settings-toggle{background:none; color:var(--muted); font-size:13px; padding:4px;}
@@ -132,7 +148,10 @@
   <div class="timer idle" id="timer">00:00:00</div>
   <div class="sub" id="subText">Premi «Arrivo» quando inizi</div>
 
-  <button class="bigbtn arrivo" id="mainBtn">▶ Arrivo</button>
+  <div class="btnrow">
+    <button class="bigbtn pausa hidden" id="pausaBtn">⏸ Pausa</button>
+    <button class="bigbtn arrivo" id="mainBtn">▶ Arrivo</button>
+  </div>
 
   <div class="rate-line">Tariffa: <b id="rateLabel">60 €/h + IVA 22%</b>
     <button class="settings-toggle" id="settingsToggle">⚙ Modifica</button>
@@ -202,6 +221,12 @@
   </div>
 </div>
 
+<!-- Lavori in pausa (compare solo se ce n'è almeno uno) -->
+<div class="card hidden" id="pausaCard">
+  <label id="pausaTitle">⏸ In pausa</label>
+  <div id="pausaLista"></div>
+</div>
+
 <!-- Riepilogo -->
 <div class="summary">
   <div class="stat"><div class="n" id="totOre">0h</div><div class="l">Ore</div></div>
@@ -216,7 +241,7 @@
 </div>
 <div id="lista"></div>
 
-<div class="ver">Sul Posto · v1.32 · 15/07/2026 · MXM</div>
+<div class="ver">Sul Posto · v1.33 · 10/09/2026 · MXM</div>
 
 <script>
 (function(){
@@ -224,11 +249,12 @@
   const LS_JOBS = "segnaore_jobs";
   const LS_CFG  = "segnaore_cfg";
   const LS_ACTIVE = "segnaore_active";
+  const LS_PAUSA = "segnaore_pausa"; // lavori messi in pausa (chiave nuova, dalla v1.33)
   const ROAD_FACTOR = 1.3; // linea d'aria → distanza stradale stimata
 
   const $ = id => document.getElementById(id);
   const timerEl = $("timer"), subEl = $("subText"), mainBtn = $("mainBtn"),
-        clienteEl = $("cliente"), dot = $("statusDot"),
+        clienteEl = $("cliente"), dot = $("statusDot"), pausaBtn = $("pausaBtn"),
         chkAndata = $("chkAndata"), chkRitorno = $("chkRitorno"), chkChiamata = $("chkChiamata");
 
   const DEFAULTS = {rate:60, round:15, iva:22, travelRate:60, speed:50, chiamata:20, sede:null, tomtomKey:"", v:2};
@@ -238,8 +264,21 @@
   save(LS_CFG, cfg);
 
   let jobs = load(LS_JOBS, []);
-  let active = load(LS_ACTIVE, null); // {cliente, start, andata, ritorno, pos}
+  let active = load(LS_ACTIVE, null); // {cliente, start, andata, ritorno, chiamata, pos, pezzi}
+  let pausati = load(LS_PAUSA, []);   // lavori in pausa: stessa forma di active, con l'ultimo pezzo chiuso
   let tick = null;
+  const inChiusura = new Set();       // lavori in pausa che si stanno chiudendo (calcolo del percorso in corso)
+
+  // PEZZI DI LAVORO (dalla v1.33). Un lavoro si può mettere in pausa e riprendere, anche
+  // giorni dopo: ogni periodo lavorato è un "pezzo" {start, end}. Il tempo lavorato è la
+  // SOMMA dei pezzi, le pause non si contano. Il lavoro in corso ha l'ultimo pezzo aperto
+  // (end = null). Un lavoro in corso salvato da una versione vecchia non ha i pezzi:
+  // diventa un pezzo solo, che parte dal suo arrivo — così continua a funzionare com'era.
+  if(active && !(Array.isArray(active.pezzi) && active.pezzi.length)){
+    active.pezzi = [{start: active.start, end: null}];
+    save(LS_ACTIVE, active);
+  }
+  if(!Array.isArray(pausati)) pausati = [];
 
   // ---- util ----
   function load(k, def){ try{ const v = JSON.parse(localStorage.getItem(k)); return v==null?def:v; }catch(e){ return def; } }
@@ -302,6 +341,18 @@
     if(r>0) min = Math.ceil(min/r)*r;
     return min/60;
   }
+  // millisecondi lavorati: somma dei pezzi (un pezzo ancora aperto conta fino ad adesso)
+  function msLavorati(pezzi){
+    const adesso = Date.now();
+    return pezzi.reduce((tot, p) => tot + Math.max(0, (p.end==null ? adesso : p.end) - p.start), 0);
+  }
+  // un pezzo di lavoro in breve: "10/09 09:00–12:00", oppure "10/09 22:00 → 11/09 01:00"
+  // se passa la mezzanotte
+  function fmtPezzo(p){
+    const a = new Date(p.start), b = new Date(p.end);
+    if(a.toDateString() === b.toDateString()) return fmtDate(p.start)+"–"+pad(b.getHours())+":"+pad(b.getMinutes());
+    return fmtDate(p.start)+" → "+fmtDate(p.end);
+  }
   // costo del solo lavoro da una durata in ms
   function calcLavoro(ms){
     const rate = Number(cfg.rate)||0;
@@ -348,22 +399,23 @@
   // in linea d'aria ×1.3 alla velocità media (null se non richiesti o senza GPS).
   // I minuti delle tratte restano GREZZI: l'arrotondamento allo scaglione avviene
   // una volta sola, sul tempo totale (viaggi + lavoro), dentro finishJob.
-  function calcViaggio(route){
-    if(!active || !(active.andata||active.ritorno) || !active.pos || !cfg.sede) return null;
+  // o = il lavoro da chiudere (quello in corso o uno in pausa).
+  function calcViaggio(o, route){
+    if(!o || !(o.andata||o.ritorno) || !o.pos || !cfg.sede) return null;
     let km, minLeg, metodo;
     if(route){
       km = route.km; minLeg = route.min; metodo = "percorso";
     } else {
-      km = kmTra(cfg.sede, active.pos) * ROAD_FACTOR;
+      km = kmTra(cfg.sede, o.pos) * ROAD_FACTOR;
       const speed = Math.max(5, Number(cfg.speed)||50);
       minLeg = km/speed*60;
       metodo = "stima";
     }
-    const legs = (active.andata?1:0) + (active.ritorno?1:0);
+    const legs = (o.andata?1:0) + (o.ritorno?1:0);
     const tRate = Number(cfg.travelRate)||0;
     return {
-      andata: !!active.andata, ritorno: !!active.ritorno, metodo: metodo,
-      km: km, minLeg: minLeg, minAndata: active.andata?minLeg:0, minRitorno: active.ritorno?minLeg:0,
+      andata: !!o.andata, ritorno: !!o.ritorno, metodo: metodo,
+      km: km, minLeg: minLeg, minAndata: o.andata?minLeg:0, minRitorno: o.ritorno?minLeg:0,
       rate: tRate, cost: (minLeg*legs)/60*tRate
     };
   }
@@ -461,12 +513,12 @@
   $("sedeCercaBtn").addEventListener("click", cercaIndirizzo);
   $("sedeIndirizzo").addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); cercaIndirizzo(); } });
   // legge la posizione dal cliente (silenziosa: se fallisce riproviamo al Finito)
-  function readClientPos(){
+  function readClientPos(o){
     if(!navigator.geolocation) return;
     navigator.geolocation.getCurrentPosition(p=>{
-      if(!active) return;
-      active.pos = {lat:p.coords.latitude, lon:p.coords.longitude};
-      save(LS_ACTIVE, active);
+      if(o !== active && !pausati.includes(o)) return; // lavoro già chiuso nel frattempo
+      o.pos = {lat:p.coords.latitude, lon:p.coords.longitude};
+      salvaAperti();
     }, ()=>{}, {enableHighAccuracy:true, timeout:20000, maximumAge:120000});
   }
 
@@ -475,7 +527,7 @@
   function stopTick(){ if(tick){ clearInterval(tick); tick=null; } }
   function updateTimer(){
     if(!active) return;
-    const ms = Date.now() - active.start;
+    const ms = msLavorati(active.pezzi); // le pause non contano
     timerEl.textContent = fmtDur(ms);
     const w = calcLavoro(ms);
     const fee = active.chiamata ? (Number(cfg.chiamata)||0) : 0;
@@ -496,6 +548,8 @@
       mainBtn.textContent = "■ Finito";
       mainBtn.className = "bigbtn finito";
       mainBtn.disabled = false;
+      pausaBtn.classList.remove("hidden");
+      pausaBtn.disabled = false;
       startTick();
     } else {
       clienteEl.disabled = false;
@@ -508,6 +562,7 @@
       mainBtn.textContent = "▶ Arrivo";
       mainBtn.className = "bigbtn arrivo";
       mainBtn.disabled = false;
+      pausaBtn.classList.add("hidden");
       stopTick();
     }
   }
@@ -524,61 +579,153 @@
         alert("Prima scrivi il nome del cliente o del lavoro.");
         return;
       }
+      // lo stesso cliente è già in pausa? Probabilmente lo si vuole riprendere
+      const giaInPausa = pausati.find(o => o.cliente.trim().toLowerCase() === nome.toLowerCase());
+      if(giaInPausa && confirm("«"+giaInPausa.cliente+"» è già in pausa.\n\nOK = riprendi quel lavoro\nAnnulla = aprine uno nuovo")){
+        riprendi(giaInPausa);
+        return;
+      }
       let andata = chkAndata.checked, ritorno = chkRitorno.checked;
       if((andata||ritorno) && !cfg.sede){
         alert("Per contare i viaggi devi prima salvare la posizione della sede:\n⚙ Modifica → 📍 Salva posizione sede (mentre sei in sede).\n\nQuesto lavoro parte SENZA viaggi.");
         andata = false; ritorno = false;
       }
-      active = { cliente: nome, start: Date.now(), andata: andata, ritorno: ritorno, chiamata: chkChiamata.checked, pos: null };
+      const ora = Date.now();
+      active = { cliente: nome, start: ora, andata: andata, ritorno: ritorno, chiamata: chkChiamata.checked, pos: null,
+                 pezzi: [{start: ora, end: null}] };
       save(LS_ACTIVE, active);
-      readClientPos(); // legge sempre la posizione: serve per i viaggi e per il luogo del cliente
+      readClientPos(active); // legge sempre la posizione: serve per i viaggi e per il luogo del cliente
       renderActiveState();
     } else {
       // FINITO
       const end = Date.now();
-      if((active.andata||active.ritorno) && !active.pos && navigator.geolocation){
+      const o = active;
+      if((o.andata||o.ritorno) && !o.pos && navigator.geolocation){
         // ultimo tentativo di leggere il GPS prima di chiudere il lavoro
-        mainBtn.disabled = true;
+        mainBtn.disabled = true; pausaBtn.disabled = true;
         mainBtn.textContent = "📡 Leggo il GPS…";
         navigator.geolocation.getCurrentPosition(
-          p=>{ active.pos = {lat:p.coords.latitude, lon:p.coords.longitude}; finishJob(end); },
-          ()=>{ finishJob(end); }, // niente GPS → salva senza viaggi
+          p=>{ o.pos = {lat:p.coords.latitude, lon:p.coords.longitude}; finishJob(o, end); },
+          ()=>{ finishJob(o, end); }, // niente GPS → salva senza viaggi
           {enableHighAccuracy:true, timeout:10000, maximumAge:300000}
         );
       } else {
-        finishJob(end);
+        finishJob(o, end);
       }
     }
   });
 
-  async function finishJob(end){
+  // ---- pausa ----
+  // svuota il modulo per il prossimo lavoro
+  function resetForm(){
+    clienteEl.value = "";
+    chkAndata.checked = true; chkRitorno.checked = true; chkChiamata.checked = true;
+  }
+  // salva il lavoro in corso e quelli in pausa
+  function salvaAperti(){
+    if(active) save(LS_ACTIVE, active); else localStorage.removeItem(LS_ACTIVE);
+    if(pausati.length) save(LS_PAUSA, pausati); else localStorage.removeItem(LS_PAUSA);
+  }
+  // ⏸ Pausa: chiude il pezzo in corso e mette il lavoro da parte; l'app torna libera
+  function mettiInPausa(){
+    if(!active) return;
+    active.pezzi[active.pezzi.length-1].end = Date.now();
+    pausati.unshift(active);
+    active = null;
+    salvaAperti();
+    resetForm();
+    renderActiveState();
+    renderPausati();
+  }
+  pausaBtn.addEventListener("click", mettiInPausa);
+  // ▶ Riprendi: il lavoro torna in corso con un pezzo nuovo. Se ce n'era già uno acceso,
+  // quello va in pausa da solo: non corrono mai due cronometri insieme.
+  function riprendi(o){
+    if(inChiusura.has(o)) return;
+    if(mainBtn.disabled){ alert("Aspetta un attimo: sto chiudendo il lavoro in corso."); return; }
+    if(active) mettiInPausa();
+    pausati = pausati.filter(x => x !== o);
+    const ora = Date.now();
+    const ultimo = o.pezzi[o.pezzi.length-1];
+    if(ora - ultimo.end < 60000) ultimo.end = null; // ripreso entro un minuto: come se la pausa non ci fosse stata
+    else o.pezzi.push({start: ora, end: null});
+    active = o;
+    salvaAperti();
+    if(!o.pos) readClientPos(o); // all'arrivo il GPS non aveva risposto: riprova adesso
+    renderActiveState();
+    renderPausati();
+  }
+  // ■ Finito su un lavoro in pausa: finisce all'ora in cui era stato messo in pausa.
+  // Il GPS NON si rilegge: potresti essere già altrove.
+  async function finisciInPausa(o){
+    if(inChiusura.has(o)) return;
+    const fine = o.pezzi[o.pezzi.length-1].end;
+    if(!confirm("Chiudere «"+o.cliente+"»?\n\nIl lavoro finisce all'ora della pausa: "+fmtDate(fine)+".")) return;
+    inChiusura.add(o);
+    renderPausati();
+    try{ await finishJob(o, fine); }
+    finally{ inChiusura.delete(o); renderPausati(); }
+  }
+  function renderPausati(){
+    const card = $("pausaCard"), lista = $("pausaLista");
+    card.classList.toggle("hidden", pausati.length === 0);
+    $("pausaTitle").textContent = "⏸ In pausa · " + pausati.length;
+    lista.innerHTML = "";
+    pausati.forEach(o=>{
+      const el = document.createElement("div");
+      el.className = "paused";
+      const chiudendo = inChiusura.has(o);
+      el.innerHTML =
+        '<div class="name"></div>'+
+        '<div class="info">🔧 '+fmtMin(msLavorati(o.pezzi)/60000)+' di lavoro · in pausa dal '
+          +fmtDate(o.pezzi[o.pezzi.length-1].end)+'</div>'+
+        '<div class="row">'+
+          '<button class="smallbtn riprendi">▶ Riprendi</button>'+
+          '<button class="smallbtn chiudi">'+(chiudendo ? "🗺 Calcolo…" : "■ Finito")+'</button>'+
+        '</div>';
+      el.querySelector(".name").textContent = o.cliente;
+      const bRip = el.querySelector(".riprendi"), bFin = el.querySelector(".chiudi");
+      bRip.disabled = chiudendo; bFin.disabled = chiudendo;
+      bRip.addEventListener("click", ()=> riprendi(o));
+      bFin.addEventListener("click", ()=> finisciInPausa(o));
+      lista.appendChild(el);
+    });
+  }
+
+  // chiude un lavoro: quello in corso (end = adesso) o uno in pausa (end = inizio della pausa)
+  async function finishJob(o, end){
+    const attivo = (o === active);
     let route = null;
-    if(active && (active.andata||active.ritorno) && active.pos && cfg.sede){
-      mainBtn.disabled = true;
-      mainBtn.textContent = "🗺 Calcolo il percorso…";
-      route = await percorsoReale(cfg.sede, active.pos); // null se offline → si usa la stima
+    if((o.andata||o.ritorno) && o.pos && cfg.sede){
+      if(attivo){
+        mainBtn.disabled = true; pausaBtn.disabled = true;
+        mainBtn.textContent = "🗺 Calcolo il percorso…";
+      }
+      route = await percorsoReale(cfg.sede, o.pos); // null se offline → si usa la stima
     }
-    const ms = end - active.start;
+    // tempo lavorato = somma dei pezzi, le pause non contano; l'ultimo pezzo si chiude qui
+    const pezzi = o.pezzi.map(p => ({start: p.start, end: p.end==null ? end : p.end}));
+    const ms = msLavorati(pezzi);
     const rate = Number(cfg.rate)||0;
     const ivaP = Number(cfg.iva)||0;
-    const v = calcViaggio(route); // null se niente viaggi; minuti grezzi
+    const v = calcViaggio(o, route); // null se niente viaggi; minuti grezzi
     // UN SOLO arrotondamento: sul tempo totale (viaggi grezzi + lavoro grezzo).
     // I minuti "di riempimento" per arrivare allo scaglione vengono fatturati come lavoro.
     const minViaggi = v ? (v.minAndata + v.minRitorno) : 0;
     const minFatturati = billableHours(ms + minViaggi*60000) * 60;
     const lavoroCost = Math.max(0, (minFatturati - minViaggi)/60 * rate);
     const vCost = v ? v.cost : 0;
-    const chiamata = active.chiamata ? (Number(cfg.chiamata)||0) : 0; // diritto fisso di chiamata (netto)
+    const chiamata = o.chiamata ? (Number(cfg.chiamata)||0) : 0; // diritto fisso di chiamata (netto)
     const imponibile = chiamata + lavoroCost + vCost;
     const iva = imponibile * ivaP/100;
-    const gpsFallito = (active.andata||active.ritorno) && !v;
+    const gpsFallito = (o.andata||o.ritorno) && !v;
     const job = {
       id: Date.now(),
-      cliente: active.cliente,
+      cliente: o.cliente,
       luogo: "",
-      pos: active.pos || null,
+      pos: o.pos || null,
       partenza: v ? (cfg.sede ? {lat:cfg.sede.lat, lon:cfg.sede.lon, nome:cfg.sede.nome||null} : null) : null,
-      start: active.start, end: end, ms: ms,
+      start: pezzi[0].start, end: pezzi[pezzi.length-1].end, ms: ms,
       rate: rate, ivaP: ivaP,
       chiamata: chiamata,
       lavoro: lavoroCost,
@@ -586,14 +733,19 @@
       viaggio: v,
       imponibile: imponibile, iva: iva, totale: imponibile+iva
     };
+    if(pezzi.length > 1) job.pezzi = pezzi; // un lavoro senza pause si salva come sempre
     jobs.unshift(job);
     save(LS_JOBS, jobs);
     if(job.pos) cercaLuogo(job); // trova l'indirizzo del cliente in sottofondo
-    active = null;
-    localStorage.removeItem(LS_ACTIVE);
-    clienteEl.value = "";
-    chkAndata.checked = true; chkRitorno.checked = true; chkChiamata.checked = true;
-    renderActiveState();
+    if(attivo){
+      active = null;
+      resetForm();
+      renderActiveState();
+    } else {
+      pausati = pausati.filter(x => x !== o);
+    }
+    salvaAperti();
+    renderPausati();
     renderList();
     if(gpsFallito) alert("⚠ Non sono riuscito a leggere il GPS: lavoro salvato SENZA viaggi.\nPuoi aggiungerli a mano in fattura.");
   }
@@ -618,7 +770,7 @@
   // ricalcola tutti gli importi di un lavoro dopo una modifica manuale degli orari
   // (i minuti di viaggio registrati restano quelli; arrotondamento unico sul totale)
   function ricalcolaJob(j){
-    j.ms = j.end - j.start;
+    j.ms = (j.pezzi && j.pezzi.length) ? msLavorati(j.pezzi) : j.end - j.start; // con le pause: somma dei pezzi
     const v = j.viaggio;
     const minViaggi = v ? ((v.minAndata||0) + (v.minRitorno||0)) : 0;
     const rate = j.rate||0;
@@ -683,10 +835,7 @@
         '<div class="editbox hidden">'+
           '<label>Cliente</label><input type="text" class="e-cliente">'+
           '<label>Luogo</label><input type="text" class="e-luogo" placeholder="Es. Via Roma 5, Milano">'+
-          '<div class="row">'+
-            '<div><label>Arrivo</label><input type="datetime-local" class="e-start"></div>'+
-            '<div><label>Fine</label><input type="datetime-local" class="e-end"></div>'+
-          '</div>'+
+          '<div class="e-pezzi"></div>'+
           '<div class="trips" style="margin-top:10px;">'+
             '<label class="chk"><input type="checkbox" class="e-andata"> 🚗 Andata</label>'+
             '<label class="chk"><input type="checkbox" class="e-ritorno"> 🏠 Ritorno</label>'+
@@ -712,8 +861,10 @@
           '</div>'+
         '</div>';
       el.querySelector(".name").textContent = j.cliente;
+      // con le pause si vede ogni periodo lavorato: "10/09 09:00–12:00 · 12/09 14:00–16:00"
       el.querySelector(".when").textContent =
-        fmtDate(j.start) + " → " + fmtDate(j.end) + "  ·  " + (j.rate||0) + "€/h";
+        ((j.pezzi && j.pezzi.length > 1) ? j.pezzi.map(fmtPezzo).join("  ·  ") : fmtDate(j.start) + " → " + fmtDate(j.end))
+        + "  ·  " + (j.rate||0) + "€/h";
       if(j.luogo){
         el.querySelector(".place").classList.remove("hidden");
         el.querySelector(".place span").textContent = j.luogo;
@@ -731,8 +882,30 @@
         if(!box.classList.contains("hidden")){
           box.querySelector(".e-cliente").value = j.cliente;
           box.querySelector(".e-luogo").value = j.luogo || "";
-          box.querySelector(".e-start").value = toLocalInput(j.start);
-          box.querySelector(".e-end").value = toLocalInput(j.end);
+          // orari: un lavoro senza pause ha un periodo solo (Arrivo/Fine, come sempre);
+          // uno messo in pausa ne ha uno per ogni periodo lavorato, ognuno correggibile
+          const pezziEdit = (j.pezzi && j.pezzi.length) ? j.pezzi : [{start:j.start, end:j.end}];
+          const piu = pezziEdit.length > 1;
+          const ePezzi = box.querySelector(".e-pezzi");
+          ePezzi.innerHTML = "";
+          pezziEdit.forEach((p, i)=>{
+            const r = document.createElement("div");
+            r.className = "e-pezzo";
+            r.innerHTML =
+              (piu ? '<div class="e-pezzo-tit">Periodo '+(i+1)+'</div>' : '')+
+              '<div class="row">'+
+                '<div><label>'+(piu ? 'Inizio' : 'Arrivo')+'</label><input type="datetime-local" class="e-start"></div>'+
+                '<div><label>Fine</label><input type="datetime-local" class="e-end"></div>'+
+              '</div>';
+            const s = r.querySelector(".e-start"), f = r.querySelector(".e-end");
+            s.value = toLocalInput(p.start); f.value = toLocalInput(p.end);
+            // orario non toccato = si tiene quello registrato, secondi compresi (così una
+            // modifica al nome non sposta il conto di qualche secondo per ogni periodo)
+            s.dataset.orig = s.value; s.dataset.ts = p.start;
+            f.dataset.orig = f.value; f.dataset.ts = p.end;
+            ePezzi.appendChild(r);
+          });
+          if(piu) ePezzi.insertAdjacentHTML("beforeend", '<div class="hint">Tra un periodo e l\'altro c\'è la pausa: quel tempo non si conta.</div>');
           const vv = j.viaggio;
           const minLeg = vv ? (vv.minLeg || vv.minAndata || vv.minRitorno || 0) : 0;
           const eA = box.querySelector(".e-andata"), eR = box.querySelector(".e-ritorno");
@@ -810,15 +983,30 @@
       ePartInput.addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); cercaPartenzaJob(); } });
       box.querySelector(".e-annulla").addEventListener("click", ()=> box.classList.add("hidden"));
       box.querySelector(".e-salva").addEventListener("click", ()=>{
-        const s = new Date(box.querySelector(".e-start").value).getTime();
-        const f = new Date(box.querySelector(".e-end").value).getTime();
-        if(isNaN(s) || isNaN(f)){ alert("Controlla gli orari di arrivo e fine."); return; }
-        if(f < s){ alert("L'orario di fine non può essere prima dell'arrivo."); return; }
+        // orari di ogni periodo. I controlli si fanno al minuto, cioè su quello che si vede:
+        // arrivo e fine nello stesso minuto vanno bene (cliente assente: zero lavoro).
+        const leggi = inp => inp.value === inp.dataset.orig ? Number(inp.dataset.ts) : new Date(inp.value).getTime();
+        const minuto = ts => Math.floor(ts/60000);
+        const righe = box.querySelectorAll(".e-pezzo");
+        const nuoviPezzi = [];
+        for(let i=0; i<righe.length; i++){
+          let s = leggi(righe[i].querySelector(".e-start")), f = leggi(righe[i].querySelector(".e-end"));
+          const piu = righe.length > 1;
+          if(isNaN(s) || isNaN(f)){ alert(piu ? "Controlla gli orari del periodo "+(i+1)+"." : "Controlla gli orari di arrivo e fine."); return; }
+          const prima = i > 0 ? nuoviPezzi[i-1].end : null;
+          if(prima != null && minuto(s) < minuto(prima)){ alert("Il periodo "+(i+1)+" comincia prima che finisca il periodo "+i+"."); return; }
+          if(minuto(f) < minuto(s)){ alert(piu ? "Nel periodo "+(i+1)+" la fine è prima dell'inizio." : "L'orario di fine non può essere prima dell'arrivo."); return; }
+          // stesso minuto ma secondi diversi (un orario toccato e uno no): si allineano
+          if(prima != null && s < prima) s = prima;
+          if(f < s) f = s;
+          nuoviPezzi.push({start: s, end: f});
+        }
         const nuovoNome = box.querySelector(".e-cliente").value.trim();
         if(!nuovoNome){ alert("Il nome del cliente non può restare vuoto."); return; }
         j.cliente = nuovoNome;
         j.luogo = box.querySelector(".e-luogo").value.trim();
-        j.start = s; j.end = f;
+        if(nuoviPezzi.length > 1) j.pezzi = nuoviPezzi; else delete j.pezzi;
+        j.start = nuoviPezzi[0].start; j.end = nuoviPezzi[nuoviPezzi.length-1].end;
         // viaggi: riattiva/disattiva le tratte; minuti e km si possono correggere a mano
         const vv = j.viaggio;
         if(vv){
@@ -862,7 +1050,7 @@
   // ---- backup / ripristino ----
   $("backupBtn").addEventListener("click", ()=>{
     const dati = { app:"sul-posto", versione:1, salvatoIl:new Date().toISOString(),
-                   cfg:cfg, jobs:jobs, attivo:active };
+                   cfg:cfg, jobs:jobs, attivo:active, inPausa:pausati };
     const blob = new Blob([JSON.stringify(dati)], {type:"application/json"});
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -882,11 +1070,14 @@
         const d = JSON.parse(lettore.result);
         if(!d || !Array.isArray(d.jobs)) throw new Error("formato non valido");
         const quando = d.salvatoIl ? d.salvatoIl.slice(0,10) : "data sconosciuta";
-        if(!confirm("Ripristinare il backup?\n\n"+d.jobs.length+" lavori (salvato il "+quando+").\nI dati attuali su questo dispositivo verranno SOSTITUITI.")) return;
+        const nPausa = Array.isArray(d.inPausa) ? d.inPausa.length : 0;
+        if(!confirm("Ripristinare il backup?\n\n"+d.jobs.length+" lavori"+(nPausa ? " + "+nPausa+" in pausa" : "")+" (salvato il "+quando+").\nI dati attuali su questo dispositivo verranno SOSTITUITI.")) return;
         localStorage.setItem(LS_JOBS, JSON.stringify(d.jobs));
         if(d.cfg) localStorage.setItem(LS_CFG, JSON.stringify(d.cfg));
         if(d.attivo) localStorage.setItem(LS_ACTIVE, JSON.stringify(d.attivo));
         else localStorage.removeItem(LS_ACTIVE);
+        if(nPausa) localStorage.setItem(LS_PAUSA, JSON.stringify(d.inPausa)); // i backup vecchi non li hanno
+        else localStorage.removeItem(LS_PAUSA);
         location.reload();
       }catch(err){
         alert("Questo file non sembra un backup valido di Sul Posto.");
@@ -899,7 +1090,7 @@
   $("exportBtn").addEventListener("click", ()=>{
     if(jobs.length===0){ alert("Nessun dato da esportare."); return; }
     const num = n => (Math.round(n*100)/100).toFixed(2).replace(".",",");
-    const rows = [["Cliente","Luogo","Inizio","Fine","Durata lavoro","Tariffa €/h","Chiamata €","Lavoro €","Viaggio min","Viaggio km","Viaggio €","Viaggio calcolo","Imponibile €","IVA %","IVA €","Totale €"]];
+    const rows = [["Cliente","Luogo","Inizio","Fine","Durata lavoro","Tariffa €/h","Chiamata €","Lavoro €","Viaggio min","Viaggio km","Viaggio €","Viaggio calcolo","Imponibile €","IVA %","IVA €","Totale €","Periodi di lavoro"]];
     jobs.slice().reverse().forEach(j=>{
       const v = j.viaggio;
       rows.push([
@@ -918,7 +1109,8 @@
         num(j.imponibile||0),
         String(j.ivaP||0).replace(".",","),
         num(j.iva||0),
-        num(j.totale||0)
+        num(j.totale||0),
+        (j.pezzi && j.pezzi.length ? j.pezzi : [{start:j.start, end:j.end}]).map(fmtPezzo).join(" · ")
       ]);
     });
     const csv = rows.map(r=>r.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(";")).join("\n");
@@ -935,6 +1127,7 @@
   refreshRateLabel();
   refreshSedeStatus();
   renderActiveState();
+  renderPausati();
   renderList();
 })();
 </script>

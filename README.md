@@ -9,6 +9,7 @@ Arrivi e premi **Arrivo**, finisci e premi **Finito** — l'app fa i conti da so
 
 ## ✨ Funzionalità
 - ▶️ Cronometro **Arrivo / Finito** con un tocco
+- ⏸️ **Pausa e ripresa**: un lavoro può durare più giorni, le pause non si contano e nel frattempo puoi registrare altri interventi
 - 🚗🏠 **Viaggi di andata e ritorno** calcolati sul **percorso stradale reale** (OpenStreetMap/OSRM), con stima automatica se sei offline
 - 🔎 Sede impostabile **cercando l'indirizzo** o col GPS
 - 💶 Calcolo automatico di **imponibile, IVA e totale** (tariffe e IVA impostabili)
